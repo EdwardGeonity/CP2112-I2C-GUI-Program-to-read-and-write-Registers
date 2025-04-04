@@ -1,0 +1,19 @@
+Addr=2D # Special Address for execution of script
+
+
+# Comment
+
+WBlock(01, Pattern) = [# Comment
+    (0600, 0002, 2), # Comment
+    (0600, 0000, 2), # Comment
+]
+
+# Comment
+
+WBlock(02, Gain) = [
+    (0x020E, 0000, 2), # Comment
+    (0x020E, 0123, 2), # Comment
+]
+
+
+# Comment
