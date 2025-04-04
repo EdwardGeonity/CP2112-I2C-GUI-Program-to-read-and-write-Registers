@@ -1,149 +1,59 @@
 # CP2112
 
-**CP2112 I2C Controller with GUI**
+![app](https://github.com/user-attachments/assets/68bf2ced-5740-437a-93e6-8933c99d89a6)
 
-This repository contains a Python-based application for controlling and communicating with I2C devices using the CP2112 USB-to-I2C bridge. The software provides a graphical user interface (GUI) for easy interaction with I2C devices, allowing users to read from and write to registers, as well as perform sequential read/write operations.
+CP2112 I²C Control Tool
 
-**Features**
+A Python GUI application for communicating with I²C devices using the Silicon Labs CP2112 HID-to-I²C bridge.
+Supports register read/write operations and execution of command scripts.
+✨ Features
 
-    CP2112 Device Initialization:
+    ✅ Read/write to 16-bit I²C registers (1 to 32 bytes)
 
-        Automatically detects and initializes the CP2112 USB-to-I2C bridge.
+    ✅ Execute custom scripts with WBlock syntax
 
-        Configures GPIO and sets the I2C bus speed to 400 kHz (configurable).
+    ✅ Batch processing via Sequence all mode
 
-    I2C Communication:
+    ✅ GUI-based input for slave address (HEX/BIN), register and data
 
-        Write Data: Write 8-bit or 16-bit data to a specific register on an I2C device.
+    ✅ Multi-byte read and write support
 
-        Read Data: Read 8-bit or 16-bit data from a specific register on an I2C device.
+    ✅ Real-time CP2112 communication via HID
 
-        Sequential Read: Read multiple bytes sequentially from consecutive registers.
+    ✅ Optional debug logging (--debug)
 
-        Error Handling: Automatically resets the CP2112 device in case of I2C communication errors.
+📜 Script Format Example
 
-    Graphical User Interface (GUI):
+Addr=2D
 
-        Slave Address Input: Specify the I2C device address in hexadecimal format.
+WBlock(01, MyInit) = [
+    (0103, 01, 1),     # Reset
+    (0104, 0123, 2),   # Set mode
+]
 
-        Register Input: Specify the target register address in hexadecimal format.
+    Addr — target I²C slave address (hex)
 
-        Data Input: Enter data to write in hexadecimal format.
+    WBlock(ID, Name) — script block with name and ID
 
-        Data Length Selection: Choose between 8-bit (1 byte) or 16-bit (2 bytes) data operations.
+    Each tuple: (Register, Data, Length)
 
-        Read Multiple Bytes: Specify the number of bytes to read sequentially.
+    Use Sequence all to execute all blocks in order
 
-        Result Display: Outputs the result of read operations in a text box.
+🚀 How to Run
+On macOS / Linux / Windows:
 
-    Error Handling and Debugging:
+python CP2112_SimpleProg_debug_mode.py
 
-        Detailed error messages for I2C communication failures.
+With debug logs:
 
-        Debugging information printed to the console for troubleshooting.
+python CP2112_SimpleProg_debug_mode.py --debug
 
-**Requirements**
+🛠 Building App / EXE
 
-    Hardware:
+    macOS:
 
-        CP2112 USB-to-I2C bridge.
+pyinstaller --windowed --name "CP2112_GUI" CP2112_SimpleProg_debug_mode.py
 
-        I2C-compatible device (e.g., sensors, EEPROMs, etc.).
+    Windows:
 
-    Software:
-
-        Python 3.x
-
-        Libraries: hidapi, tkinter
-
-**Install the required libraries using pip:**
-
-  pip install hidapi
-
-**How to Use**
-
-    Connect the CP2112 Device:
-
-        Plug the CP2112 USB-to-I2C bridge into your computer.
-
-        Connect the I2C device to the CP2112.
-
-    Run the Application:
-
-        Execute the script:
-        bash
-        Copy
-
-        python cp2112_i2c_gui.py
-
-        The GUI will open, allowing you to interact with the I2C device.
-
-    Using the GUI:
-
-        Enter the Slave Address, Register Address, and Data in hexadecimal format.
-
-        Select the data length (1 byte or 2 bytes).
-
-        Use the Write to Register button to write data or the Read Register button to read data.
-
-        For sequential reads, specify the number of bytes and click Read Multiple Bytes.
-
-**Example Use Cases**
-
-    Reading Sensor Data:
-
-        Read temperature, humidity, or other sensor data from I2C sensors.
-
-    Configuring I2C Devices:
-
-        Write configuration settings to I2C devices such as DACs, ADCs, or EEPROMs.
-
-    Debugging I2C Communication:
-
-        Use the debugging output to troubleshoot I2C communication issues.
-
-**Code Structure**
-
-    CP2112_I2C Class:
-
-        Handles low-level communication with the CP2112 device.
-
-        Implements methods for reading/writing data and handling errors.
-
-    I2CGUI Class:
-
-        Provides a user-friendly interface for interacting with I2C devices.
-
-        Includes input fields, buttons, and a result display area.
-
-    Main Function:
-
-        Initializes the CP2112 device and launches the GUI.
-
-**Screenshot**
-
-![App](https://github.com/user-attachments/assets/cb636a1b-1f2d-4459-9093-545ee4614659)
-
-
-**Contributing**
-
-Contributions are welcome! If you find any issues or have suggestions for improvements, please open an issue or submit a pull request.
-License
-
-This project is licensed under the MIT License. See the LICENSE file for details.
-Acknowledgments
-
-    Silicon Labs for the CP2112 USB-to-I2C bridge.
-
-    hidapi for providing the Python library for HID device communication.
-
-**Contact**
-
-For questions or support, feel free to reach out
-
-**Donations**
-
-PayPal donations are welcome: edwardgeonity@gmail.com
-
-
-Based on "Python code to talk to CP2112 I2C to USB bridge IC 'https://github.com/artizirk/cp2112'"
+pyinstaller --windowed --name "CP2112_GUI.exe" CP2112_SimpleProg_debug_mode.py
