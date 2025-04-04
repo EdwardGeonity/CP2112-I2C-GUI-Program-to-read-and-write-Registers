@@ -1,4 +1,3 @@
-
 import time
 import hid
 import tkinter as tk
@@ -11,74 +10,144 @@ class CP2112_I2C:
         self.open_device()
 
     def open_device(self):
+        """Open the CP2112 device."""
         try:
-            self.h.open(0x10C4, 0xEA90, self.serial)
+            self.h.open(0x10C4, 0xEA90, self.serial)  # Connect to CP2112
             print("Manufacturer: %s" % self.h.get_manufacturer_string())
             print("Product: %s" % self.h.get_product_string())
             print("Serial No: %s" % self.h.get_serial_number_string())
 
+            # Configure GPIO (optional, if you need to control LEDs)
             self.h.send_feature_report([0x03, 0xFF, 0x00, 0x00, 0x00])  # Set GPIO to Open-Drain
 
+            # Configure SMBus (I2C) at 400 kHz
             self.h.send_feature_report([
-                0x06, 0x00, 0x06, 0x00, 0x32,
-                0x00, 0x00, 0x00,
-                0xFF, 0x00,
-                0xFF, 0x01, 0x00, 0x0F
+                0x06,               # SMBus configuration command
+                0x00,               # Reserved, always 0x00
+                0x06,               # SMBus speed = 400 kHz (0x01 = 100khz)
+                0x00, 0x32,         # Slave address timeout (50 ms)
+                0x00,               # SCL Low timeout disabled (MANDATORY!)
+                0x00, 0x00,         # Retry Time disabled
+                0xFF, 0x00,         # Reserved, always 0xFF and 0x00
+                0xFF,               # Reserved
+                0x01,               # Reserved
+                0x00,               # Reserved
+                0x0F                # Clock stretching enabled (recommended)
             ])
         except Exception as e:
             print(f"Error opening device: {e}")
             raise
 
     def write_data(self, address, register, value, data_length):
+        """Write data to a register (1–8 bytes)."""
         try:
-            if data_length == 1:
-                self.h.write([0x14, address, 0x03, register >> 8, register & 0xFF, value & 0xFF])
-                print(f"Write: Address 0x{address:02X}, Register 0x{register:04X}, Data 0x{value:02X}")
-            elif data_length == 2:
-                self.h.write([0x14, address, 0x04, register >> 8, register & 0xFF,
-                              (value >> 8) & 0xFF, value & 0xFF])
-                print(f"Write: Address 0x{address:02X}, Register 0x{register:04X}, Data 0x{value:04X}")
+            if data_length <= 2:
+                # Use standard write reports
+                if data_length == 1:
+                    self.h.write([0x14, address << 1, 0x03, register >> 8, register & 0xFF, value & 0xFF])
+                elif data_length == 2:
+                    self.h.write([0x14, address << 1, 0x04, register >> 8, register & 0xFF,
+                                  (value >> 8) & 0xFF, value & 0xFF])
+                print(f"Write: Addr 0x{address:02X}, Reg 0x{register:04X}, Data 0x{value:0{data_length*2}X}")
+            elif data_length <= 8:
+                # Convert value to bytes (MSB first)
+                data_bytes = value.to_bytes(data_length, byteorder='big')
+
+                report = [
+                    0x17,                 # Report ID
+                    address << 1,         # 7-bit address << 1
+                    data_length,          # Byte count
+                    0x02,                 # Command: Write to register
+                    register >> 8,        # Register MSB
+                    register & 0xFF       # Register LSB
+                ] + list(data_bytes)
+
+                # Pad to 64 bytes
+                report += [0x00] * (64 - len(report))
+
+                self.h.write(report)
+                print(f"Write (block): Addr 0x{address:02X}, Reg 0x{register:04X}, Data: {[hex(b) for b in data_bytes]}")
             else:
-                raise ValueError("Unsupported data length")
+                raise ValueError("Data length too long (max 8 bytes supported)")
         except Exception as e:
             print(f"Write error: {e}")
             self.I2CError()
 
+    def write_block_data(self, address, register, data_bytes):
+        """Write data block (up to 61 bytes) using Report ID 0x14."""
+        if not (1 <= len(data_bytes) <= 61):
+            raise ValueError("Data length must be between 1 and 61")
+
+        report = [
+            0x14,                    # Report ID
+            address << 1,            # I2C address (7-bit << 1)
+            len(data_bytes) + 2,     # Total bytes: register (2) + data
+            (register >> 8) & 0xFF,  # Register MSB
+            register & 0xFF          # Register LSB
+        ] + list(data_bytes)
+
+        report += [0x00] * (64 - len(report))  # Pad to 64 bytes
+
+        print(f"[→] Sending block write: {[hex(b) for b in report[:6+len(data_bytes)]]}")
+        self.h.write(report)
+
+
+
     def read_data(self, address, register, data_length):
+        """Read data from a register (1, 2, 4, or 8 bytes)."""
         try:
+            # Send read request
             self.h.write([
-                0x11, address, 0x00, data_length,
-                0x02, register >> 8, register & 0xFF
+                0x11,                  # Report ID
+                address << 1,          # 7-bit address shifted
+                0x00,                  # Reserved
+                data_length,           # Bytes to read
+                0x02,                  # Register address length (2 bytes)
+                register >> 8,         # MSB of register
+                register & 0xFF        # LSB of register
             ])
 
             for _ in range(10):
-                self.h.write([0x15, 0x01])
+                time.sleep(0.01)  # slight delay for device response
+                self.h.write([0x15, 0x01])  # Transfer Status Request
                 response = self.h.read(7)
                 print(f"Status response: {[hex(x) for x in response]}")
 
-                if (response[0] == 0x16) and (response[2] == 5):
-                    self.h.write([0x12, 0x00, data_length])
+                if response[0] == 0x16 and response[2] == 0x05:
+                    self.h.write([0x12, 0x00, data_length])  # Data Read Force
                     response = self.h.read(data_length + 3)
                     print(f"Data response: {[hex(x) for x in response]}")
 
-                    if response[0] == 0x13:
-                        if data_length == 1:
-                            return response[3]
-                        elif data_length == 2:
-                            return (response[3] << 8) | response[4]
+                    if response[0] == 0x13 and response[2] == data_length:
+                        # Сборка данных из байтов (MSB first)
+                        data_bytes = response[3:3 + data_length]
+                        result = 0
+                        for b in data_bytes:
+                            result = (result << 8) | b
+                        print(f"Read: Address 0x{address:02X}, Register 0x{register:04X}, Data 0x{result:0{data_length*2}X}")
+                        return result
+
+            print("Data read error...")
             self.I2CError()
         except Exception as e:
             print(f"Read error: {e}")
             self.I2CError()
 
+
     def read_multiple_bytes(self, address, register, num_bytes):
+        """Read multiple bytes in a row."""
         try:
-            return [self.read_data(address, register + i, 1) for i in range(num_bytes)]
+            data = []
+            for i in range(num_bytes):
+                byte_data = self.read_data(address, register + i, 1)
+                data.append(byte_data)
+            return data
         except Exception as e:
             print(f"Error reading multiple bytes: {e}")
             self.I2CError()
 
     def write_multiple_bytes(self, address, register, data):
+        """Write multiple bytes in a row."""
         try:
             for i, value in enumerate(data):
                 self.write_data(address, register + i, value, 1)
@@ -87,15 +156,16 @@ class CP2112_I2C:
             self.I2CError()
 
     def I2CError(self):
+        """Handle I2C errors."""
         print("Resetting device...")
         try:
-            self.h.send_feature_report([0x01, 0x01])
+            self.h.send_feature_report([0x01, 0x01])  # Reset Device
         except Exception as e:
             print(f"Error resetting device: {e}")
         finally:
             self.h.close()
-            time.sleep(3)
-            self.open_device()
+            time.sleep(3)  # Give time to release the bus
+            self.open_device()  # Reopen the device after reset
             raise IOError("I2C error, device reset and reopened.")
 
 class I2CGUI:
@@ -104,53 +174,62 @@ class I2CGUI:
         self.i2c = i2c
         self.root.title("I2C Control (16-bit registers)")
 
+        # Device Bin address        
         self.addressbin_label = tk.Label(root, text="Slave address (7-bit BIN):")
         self.addressbin_label.grid(row=0, column=0, padx=10, pady=10)
         self.addressbin_entry = tk.Entry(root)
         self.addressbin_entry.grid(row=0, column=1, padx=10, pady=10)
-        self.addressbin_entry.insert(0, "1011010")
+        self.addressbin_entry.insert(0, "00101101")
         self.addressbin_entry.bind("<KeyRelease>", self.sync_bin_to_hex)
 
+        # Device Hex address
         self.address_label = tk.Label(root, text="Slave address (HEX):")
         self.address_label.grid(row=1, column=0, padx=10, pady=10)
         self.address_entry = tk.Entry(root)
         self.address_entry.grid(row=1, column=1, padx=10, pady=10)
-        self.address_entry.insert(0, "0x5A")
+        self.address_entry.insert(0, "0x2D")
         self.address_entry.bind("<KeyRelease>", self.sync_hex_to_bin)
 
+        # Register Hex Index
         self.register_label = tk.Label(root, text="Register (hex, 16 bits):")
         self.register_label.grid(row=2, column=0, padx=10, pady=10)
         self.register_entry = tk.Entry(root)
         self.register_entry.grid(row=2, column=1, padx=10, pady=10)
         self.register_entry.insert(0, "0x020E")
 
+        # Data to write
         self.data_label = tk.Label(root, text="Data to write (hex):")
         self.data_label.grid(row=3, column=0, padx=10, pady=10)
         self.data_entry = tk.Entry(root)
         self.data_entry.grid(row=3, column=1, padx=10, pady=10)
         self.data_entry.insert(0, "0x0000")
 
+        # Data length
         self.data_length_label = tk.Label(root, text="Data length (bytes):")
         self.data_length_label.grid(row=4, column=0, padx=10, pady=10)
-        self.data_length_combobox = ttk.Combobox(root, values=["1", "2"])
+        self.data_length_combobox = ttk.Combobox(root, values=["1", "2", "4", "8", "16", "32"])
         self.data_length_combobox.grid(row=4, column=1, padx=10, pady=10)
         self.data_length_combobox.current(0)
 
+        # Write button
         self.write_button = tk.Button(root, text="Write to register", command=self.write_data)
         self.write_button.grid(row=5, column=0, padx=10, pady=10)
 
+        # Read button
         self.read_button = tk.Button(root, text="Read Register", command=self.read_data)
         self.read_button.grid(row=5, column=1, padx=10, pady=10)
 
+        # Sequential read
         self.read_multiple_label = tk.Label(root, text="Read multiple bytes (count):")
         self.read_multiple_label.grid(row=6, column=0, padx=10, pady=10)
         self.read_multiple_entry = tk.Entry(root)
         self.read_multiple_entry.grid(row=6, column=1, padx=10, pady=10)
-        self.read_multiple_entry.insert(0, "4")
+        self.read_multiple_entry.insert(0, "4")  # Default 4 bytes
 
         self.read_multiple_button = tk.Button(root, text="Read Multiple Bytes", command=self.read_multiple_bytes)
         self.read_multiple_button.grid(row=7, column=0, columnspan=2, padx=10, pady=10)
 
+        # Result output field
         self.result_label = tk.Label(root, text="Result:")
         self.result_label.grid(row=8, column=0, padx=4, pady=10)
         self.result_text = tk.Text(root, height=10, width=50)
@@ -190,50 +269,68 @@ class I2CGUI:
         except:
             pass
 
+
     def write_data(self):
+        """Write data to a register."""
         try:
-            address = self.get_address()
+            address = int(self.address_entry.get(), 16)
             register = int(self.register_entry.get(), 16)
             value = int(self.data_entry.get(), 16)
             data_length = int(self.data_length_combobox.get())
+
             if data_length == 1 and value > 0xFF:
-                raise ValueError("For 8-bit write, data must be 0x00-0xFF")
+                raise ValueError("For 8-bit write, data must be in the range 0x00-0xFF")
             elif data_length == 2 and value > 0xFFFF:
-                raise ValueError("For 16-bit write, data must be 0x0000-0xFFFF")
+                raise ValueError("For 16-bit write, data must be in the range 0x0000-0xFFFF")
+            elif data_length > 2:
+                value_bytes = value.to_bytes(data_length, byteorder='big')
+                self.i2c.write_block_data(address, register, value_bytes)
+                self.root.bell()
+                return
+
             self.i2c.write_data(address, register, value, data_length)
-            messagebox.showinfo("Success", "Data written successfully!")
+            self.root.bell()
+
         except Exception as e:
             messagebox.showerror("Error", f"Write error: {e}")
 
     def read_data(self):
+        """Read data from a register."""
         try:
-            address = self.get_address()
+            address = int(self.address_entry.get(), 16)
             register = int(self.register_entry.get(), 16)
             data_length = int(self.data_length_combobox.get())
+            #data = self.i2c.read_data(address | 0x01, register, data_length)
             data = self.i2c.read_data(address, register, data_length)
             self.result_text.delete(1.0, tk.END)
-            if data_length == 1:
-                self.result_text.insert(tk.END, f"0x{data:02X}")
-            elif data_length == 2:
-                self.result_text.insert(tk.END, f"0x{data:04X}")
-            messagebox.showinfo("Success", "Data read successfully!")
+            hex_width = data_length * 2
+            self.result_text.insert(tk.END, f"0x{data:0{hex_width}X}")
+
+            #messagebox.showinfo("Success", "Data read successfully!")
+            self.root.bell()
         except Exception as e:
             messagebox.showerror("Error", f"Read error: {e}")
 
     def read_multiple_bytes(self):
+        """Read multiple bytes in a row."""
         try:
-            address = self.get_address()
+            address = int(self.address_entry.get(), 16)
             register = int(self.register_entry.get(), 16)
             num_bytes = int(self.read_multiple_entry.get())
+            #data = self.i2c.read_multiple_bytes(address | 0x01, register, num_bytes)
             data = self.i2c.read_multiple_bytes(address, register, num_bytes)
             self.result_text.delete(1.0, tk.END)
             self.result_text.insert(tk.END, ", ".join([f"0x{byte:02X}" for byte in data]))
-            messagebox.showinfo("Success", "Data read successfully!")
+            #messagebox.showinfo("Success", "Data read successfully!")
+            self.root.bell()
         except Exception as e:
             messagebox.showerror("Error", f"Read error: {e}")
 
 def main():
+    # Initialize CP2112
     i2c = CP2112_I2C()
+
+    # Create the GUI
     root = tk.Tk()
     gui = I2CGUI(root, i2c)
     root.mainloop()
